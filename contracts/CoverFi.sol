@@ -10,6 +10,7 @@ import {SuperAppBase} from "@superfluid-finance/ethereum-contracts/contracts/app
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "@uma/core/contracts/common/implementation/AddressWhitelist.sol";
 import "@uma/core/contracts/oracle/implementation/Constants.sol";
@@ -26,12 +27,9 @@ import "@uma/core/contracts/oracle/interfaces/OptimisticOracleV2Interface.sol";
  * automatically pays out insurance coverage to the insured beneficiary. If the claim is rejected policy continues to be
  * active ready for the subsequent claim attempts.
  */
-contract CoverFi is Testable {
+contract CoverFi is Testable, Ownable {
     using SafeERC20 for IERC20;
     using CFAv1Library for CFAv1Library.InitData;
-
-
-
 
     /******************************************
      *  STATE VARIABLES AND DATA STRUCTURES   *
@@ -47,18 +45,20 @@ contract CoverFi is Testable {
     
     ISuperfluid public immutable host;
 
-
-
     // Stores state and parameters of insurance policy.
     struct InsurancePolicy {
         bool claimInitiated; // Claim state preventing simultaneous claim attempts.
         string insuredEvent; // Short description of insured event.
         address insuredAddress; // Beneficiary address eligible for insurance compensation.
         uint256 insuredAmount; // Amount of insurance coverage.
+        uint256 premium; // Premium
     }
 
     // References all active insurance policies by policyId.
     mapping(bytes32 => InsurancePolicy) public insurancePolicies;
+
+    // Mapping from user address to policyId array (a user can have multiple active policies).
+    mapping(address => bytes32[]) public userPolicies;
 
     // Maps hash of initiated claims to their policyId.
     // This is used in callback function to potentially pay out the beneficiary.
@@ -95,6 +95,8 @@ contract CoverFi is Testable {
         address indexed insuredAddress,
         uint256 insuredAmount
     );
+    event PolicyCanceled(bytes32 indexed policyId, uint256 premium);
+
     event ClaimSubmitted(uint256 claimTimestamp, bytes32 indexed claimId, bytes32 indexed policyId);
     event ClaimAccepted(bytes32 indexed claimId, bytes32 indexed policyId);
     event ClaimRejected(bytes32 indexed claimId, bytes32 indexed policyId);
@@ -161,6 +163,8 @@ contract CoverFi is Testable {
         newPolicy.insuredAddress = insuredAddress;
         newPolicy.insuredAmount = insuredAmount;
 
+        userPolicies[insuredAddress].push(policyId);
+
         currency.safeTransferFrom(msg.sender, address(this), insuredAmount);
 
         emit PolicyIssued(policyId, msg.sender, insuredEvent, insuredAddress, insuredAmount);
@@ -205,6 +209,30 @@ contract CoverFi is Testable {
      ******************************************/
     function _updateOutflow(bytes calldata ctx)  private returns (bytes memory newCtx) {
         //Insert logic for working with stream
+
+    }
+
+     /******************************************
+     *           Alluo FUNCTIONS           *
+     ******************************************/
+    function withdraw(bytes32 policyId) external {
+        InsurancePolicy storage insurancePolicy = insurancePolicies[policyId];
+
+        require(msg.sender == insurancePolicy.insuredAddress, "Not the insurance owner");
+        require(!insurancePolicy.claimInitiated, "Claim already initiated");
+
+        delete insurancePolicies[policyId];
+        delete userPolicies[insurancePolicy.insuredAddress][policyId];
+
+        //TODO: withdraw `insurancePolicy.premium` amount (in USDC) from Alluo and then transfer to the user
+
+        currency.safeTransfer(insurancePolicy.insuredAddress, claimedPolicy.premium);
+
+        emit PolicyCanceled(policyId, premium);
+    }
+
+    //TODO: possibilty to withdraw the treasury from Alluo
+    function withdrawAll(uint256 amount) external onlyOwner {
 
     }
 
@@ -262,6 +290,7 @@ contract CoverFi is Testable {
         // Deletes insurance policy and transfers claim amount if the claim was confirmed.
         if (price == 1e18) {
             delete insurancePolicies[policyId];
+            delete userPolicies[claimedPolicy.insuredAddress][policyId];
             currency.safeTransfer(claimedPolicy.insuredAddress, claimedPolicy.insuredAmount);
 
             emit ClaimAccepted(claimId, policyId);
