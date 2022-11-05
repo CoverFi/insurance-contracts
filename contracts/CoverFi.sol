@@ -79,7 +79,7 @@ contract CoverFi is Testable, Ownable {
 
     uint256 public constant MAX_EVENT_DESCRIPTION_SIZE = 300; // Insured event description should be concise.
 
-    mapping(address => AllowedInsurance) public allowedInsurances;
+    mapping(uint256 => AllowedInsurance) public allowedInsurances;
 
     /****************************************
      *                EVENTS                *
@@ -115,6 +115,7 @@ contract CoverFi is Testable, Ownable {
         currency = IERC20(_currency);
         oo = OptimisticOracleV2Interface(finder.getImplementationAddress(OracleInterfaces.OptimisticOracleV2));
         alluo = IIbAlluo(_alluoAddress);
+
     }
 
     /******************************************
@@ -130,7 +131,14 @@ contract CoverFi is Testable, Ownable {
      * @param insuredAmount Amount of insurance coverage.
      * @return policyId Unique identifier of issued insurance policy.
      */
+
+    function calculateStake(uint256 _protocolAddress, uint256 _insuredAmount) internal returns(uint256){
+        uint256 premium = allowedInsurances[_protocolAddress].premium;
+        uint256 stake = premium * _insuredAmount;
+        return stake;
+    }
     function issueInsurance(
+        uint256 protocolAddress,
         string calldata insuredEvent,
         address insuredAddress,
         uint256 insuredAmount,
@@ -139,6 +147,8 @@ contract CoverFi is Testable, Ownable {
         require(bytes(insuredEvent).length <= MAX_EVENT_DESCRIPTION_SIZE, "Event description too long");
         require(insuredAddress != address(0), "Invalid insured address");
         require(insuredAmount > 0, "Amount should be above 0");
+        require(allowedInsurances[protocolAddress]);
+        require(premium >= calculateStake(protocolAddress, insuredAmount)/alluo.growingRatio());
         //TODO: check if the protocol is in allowedInsurances
         policyId = _getPolicyId(block.number, insuredEvent, insuredAddress, insuredAmount);
         require(insurancePolicies[policyId].insuredAddress == address(0), "Policy already issued");
