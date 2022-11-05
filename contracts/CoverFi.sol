@@ -43,7 +43,6 @@ contract CoverFi is Testable, Ownable {
     }
 
     struct AllowedInsurance {
-        address protocolAddress;
         uint256 maxAmount;
         uint256 premium;
     }
@@ -80,7 +79,7 @@ contract CoverFi is Testable, Ownable {
 
     uint256 public constant MAX_EVENT_DESCRIPTION_SIZE = 300; // Insured event description should be concise.
 
-    AllowedInsurance[] private allowedInsurances;
+    mapping(address => AllowedInsurance) public allowedInsurances;
 
     /****************************************
      *                EVENTS                *
@@ -208,7 +207,7 @@ contract CoverFi is Testable, Ownable {
         totalInsurancePremium -= insurancePolicy.premium;
 
         // Withdraw from Alluo and transfer to the user
-        alluo.withdrawTo(insurancePolicy.insuredAddress, currency, insurancePolicy.premium);
+        alluo.withdrawTo(insurancePolicy.insuredAddress, address(currency), insurancePolicy.premium);
 
         emit PolicyCanceled(policyId, insurancePolicy.premium);
     }
@@ -218,26 +217,18 @@ contract CoverFi is Testable, Ownable {
     }
 
     function addAllowedInsurances(
-        address protocolAddress,
-        uint256 maxAmount,
-        uint256 premium
+        address _protocolAddress,
+        uint256 _maxAmount,
+        uint256 _premium
         )
         external
         onlyOwner
-        returns (bool)
     {
-        for (uint256 i = 0; i < allowedInsurances.length; i++) {
-            if (allowedInsurances[i].protocolAddress == protocolAddress) {
-                return false; //Already exist
-            }
-        }
-        AllowedInsurance memory allowedInsurance = AllowedInsurance({
-            protocolAddress: protocolAddress,
-            maxAmount: maxAmount,
-            premium: premium
+        require(allowedInsurances[_protocolAddress].maxAmount == 0, "Already exists");
+        allowedInsurances[_protocolAddress] = AllowedInsurance({
+            maxAmount: _maxAmount,
+            premium: _premium
         });
-        allowedInsurances.push(allowedInsurance);
-        return true;
     }
 
     /******************************************
