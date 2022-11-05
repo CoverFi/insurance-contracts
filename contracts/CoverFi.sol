@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.0;
 
-import {ISuperfluid, ISuperToken, ISuperApp, ISuperAgreement, SuperAppDefinitions} from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluid.sol";  
-import {CFAv1Library} from "@superfluid-finance/ethereum-contracts/contracts/apps/CFAv1Library.sol";
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {SuperAppBase} from "@superfluid-finance/ethereum-contracts/contracts/apps/SuperAppBase.sol";
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -29,21 +24,12 @@ import "@uma/core/contracts/oracle/interfaces/OptimisticOracleV2Interface.sol";
  */
 contract CoverFi is Testable, Ownable {
     using SafeERC20 for IERC20;
-    using CFAv1Library for CFAv1Library.InitData;
 
     /******************************************
      *  STATE VARIABLES AND DATA STRUCTURES   *
      ******************************************/
 
-    /*
-    Superfluid
-    */
-    CFAv1Library.InitData public cfaV1;
-
-    bytes32 public constant CFA_ID =
-        keccak256("org.superfluid-finance.agreements.ConstantFlowAgreement.v1");
     
-    ISuperfluid public immutable host;
 
     // Stores state and parameters of insurance policy.
     struct InsurancePolicy {
@@ -116,22 +102,6 @@ contract CoverFi is Testable, Ownable {
         finder = _finder;
         currency = IERC20(_currency);
         oo = OptimisticOracleV2Interface(finder.getImplementationAddress(OracleInterfaces.OptimisticOracleV2));
-
-        //Superfluid ***************
-         IConstantFlowAgreementV1 cfa = IConstantFlowAgreementV1(
-            address(_host.getAgreementClass(CFA_ID))
-        );
-        host = _host;
-
-        cfaV1 = CFAv1Library.InitData(_host, cfa);
-
-        // super app registration
-        uint256 configWord = SuperAppDefinitions.APP_LEVEL_FINAL |
-            SuperAppDefinitions.BEFORE_AGREEMENT_CREATED_NOOP |
-            SuperAppDefinitions.BEFORE_AGREEMENT_UPDATED_NOOP |
-            SuperAppDefinitions.BEFORE_AGREEMENT_TERMINATED_NOOP;
-
-        _host.registerApp(configWord);
     }
 
     /******************************************
@@ -204,13 +174,6 @@ contract CoverFi is Testable, Ownable {
 
         emit ClaimSubmitted(timestamp, claimId, policyId);
     }
-     /******************************************
-     *           Superfluid FUNCTIONS           *
-     ******************************************/
-    function _updateOutflow(bytes calldata ctx)  private returns (bytes memory newCtx) {
-        //Insert logic for working with stream
-
-    }
 
      /******************************************
      *           Alluo FUNCTIONS           *
@@ -239,31 +202,6 @@ contract CoverFi is Testable, Ownable {
     /******************************************
      *           CALLBACK FUNCTIONS           *
      ******************************************/
-
-     /*
-     Superfluid
-     */
-      /// @dev super app after agreement created callback
-    function afterAgreementCreated(
-        ISuperToken _superToken,
-        address _agreementClass,
-        bytes32, // _agreementId,
-        bytes calldata, /*_agreementData*/
-        bytes calldata, // _cbdata,
-        bytes calldata ctx
-    )
-        external
-        override
-        onlyExpected(_superToken, _agreementClass)
-        onlyHost
-        returns (bytes memory newCtx)
-    {
-        newCtx = _updateOutflow(ctx);
-    }
-
-    /*
-    UMA
-    */
 
     /**
      * @notice Callback function called by the Optimistic Oracle when the claim is settled. If the claim is confirmed
