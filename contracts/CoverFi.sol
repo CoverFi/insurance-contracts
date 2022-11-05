@@ -16,6 +16,8 @@ import "@uma/core/contracts/common/implementation/Testable.sol";
 import "@uma/core/contracts/oracle/interfaces/FinderInterface.sol";
 import "@uma/core/contracts/oracle/interfaces/OptimisticOracleV2Interface.sol";
 
+import "./interfaces/IIbAlluo.sol";
+
 /**
  * @title Insurance Arbitrator Contract
  * @notice This example implementation allows insurer to issue insurance policy by depositing insured amount,
@@ -71,6 +73,8 @@ contract CoverFi is Testable, Ownable {
 
     IERC20 public immutable currency; // Denomination token for insurance coverage and bonding.
 
+    IIbAlluo public immutable alluo; // Alluo
+
     uint256 public constant MAX_EVENT_DESCRIPTION_SIZE = 300; // Insured event description should be concise.
 
     /****************************************
@@ -82,7 +86,8 @@ contract CoverFi is Testable, Ownable {
         address indexed insurer,
         string insuredEvent,
         address indexed insuredAddress,
-        uint256 insuredAmount
+        uint256 insuredAmount,
+        uint256 premium
     );
     event PolicyCanceled(bytes32 indexed policyId, uint256 premium);
 
@@ -100,11 +105,12 @@ contract CoverFi is Testable, Ownable {
         FinderInterface _finder,
         address _currency,
         address _timer,
-        ISuperfluid _host
+        address _alluoAddress
     ) Testable(_timer) {
         finder = _finder;
         currency = IERC20(_currency);
         oo = OptimisticOracleV2Interface(finder.getImplementationAddress(OracleInterfaces.OptimisticOracleV2));
+        alluo = IIbAlluo(_alluoAddress);
     }
 
     /******************************************
@@ -123,7 +129,8 @@ contract CoverFi is Testable, Ownable {
     function issueInsurance(
         string calldata insuredEvent,
         address insuredAddress,
-        uint256 insuredAmount
+        uint256 insuredAmount,
+        uint256 premium
     ) external returns (bytes32 policyId) {
         require(bytes(insuredEvent).length <= MAX_EVENT_DESCRIPTION_SIZE, "Event description too long");
         require(insuredAddress != address(0), "Invalid insured address");
@@ -135,12 +142,13 @@ contract CoverFi is Testable, Ownable {
         newPolicy.insuredEvent = insuredEvent;
         newPolicy.insuredAddress = insuredAddress;
         newPolicy.insuredAmount = insuredAmount;
+        newPolicy.premium = premium;
 
         userPolicies[insuredAddress].push(policyId);
 
         currency.safeTransferFrom(msg.sender, address(this), insuredAmount);
 
-        emit PolicyIssued(policyId, msg.sender, insuredEvent, insuredAddress, insuredAmount);
+        emit PolicyIssued(policyId, msg.sender, insuredEvent, insuredAddress, insuredAmount, premium);
     }
 
     /**
@@ -203,7 +211,7 @@ contract CoverFi is Testable, Ownable {
         emit Deposited(msg.sender, _token, _amount);
     }
 
-    function withdraw(bytes32 policyId) external {
+    function cancelInsurance(bytes32 policyId) external {
         InsurancePolicy storage insurancePolicy = insurancePolicies[policyId];
 
         require(msg.sender == insurancePolicy.insuredAddress, "Not the insurance owner");
@@ -212,16 +220,15 @@ contract CoverFi is Testable, Ownable {
         delete insurancePolicies[policyId];
         delete userPolicies[insurancePolicy.insuredAddress][policyId];
 
-        //TODO: withdraw `insurancePolicy.premium` amount (in USDC) from Alluo and then transfer to the user
-
-        currency.safeTransfer(insurancePolicy.insuredAddress, claimedPolicy.premium);
+        // Withdraw from Alluo and transfer to the user
+        alluo.withdrawTo(insurancePolicy.insuredAddress, currency, insurancePolicy.premium);
 
         emit PolicyCanceled(policyId, premium);
     }
 
     //TODO: possibilty to withdraw the treasury from Alluo
-    function withdrawAll(uint256 amount) external onlyOwner {
-
+    function withdrawFromTreasury(uint256 amount) external onlyOwner {
+        alluo.withdrawTo(msg.sender, currency, amount);
     }
 
     /******************************************
