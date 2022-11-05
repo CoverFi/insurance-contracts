@@ -44,6 +44,7 @@ contract CoverFi is Testable, Ownable {
 
     struct AllowedInsurance {
         uint256 maxAmount;
+        string name;
         uint256 premium;
     }
 
@@ -115,6 +116,10 @@ contract CoverFi is Testable, Ownable {
         currency = IERC20(_currency);
         oo = OptimisticOracleV2Interface(finder.getImplementationAddress(OracleInterfaces.OptimisticOracleV2));
         alluo = IIbAlluo(_alluoAddress);
+        addAllowedInsurances(1, "Aave","0.0191");
+        addAllowedInsurances(2, "Yearn","0.0191");
+        addAllowedInsurances(3, "Comp", "0.0191");
+
 
     }
 
@@ -226,16 +231,16 @@ contract CoverFi is Testable, Ownable {
     }
 
     function addAllowedInsurances(
-        address _protocolAddress,
-        uint256 _maxAmount,
+        uint256 _protocolAddress,
+        string _name,
         uint256 _premium
         )
         external
         onlyOwner
     {
-        require(allowedInsurances[_protocolAddress].maxAmount == 0, "Already exists");
+        require(allowedInsurances[_protocolAddress] == 0, "Already exists");
         allowedInsurances[_protocolAddress] = AllowedInsurance({
-            maxAmount: _maxAmount,
+            name: _name,
             premium: _premium
         });
     }
