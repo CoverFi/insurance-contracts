@@ -43,7 +43,6 @@ contract CoverFi is Testable, Ownable {
     }
 
     struct AllowedInsurance {
-        uint256 maxAmount;
         string name;
         uint256 premium;
     }
@@ -58,6 +57,9 @@ contract CoverFi is Testable, Ownable {
     // This is used in callback function to potentially pay out the beneficiary.
     mapping(bytes32 => bytes32) public insuranceClaims;
 
+    mapping(uint256 => AllowedInsurance) public allowedInsurances;
+
+
     uint256 public constant oracleBondPercentage = 0.001e18; // Proposal bond set to 0.1% of claimed insurance coverage.
 
     uint256 public constant optimisticOracleLivenessTime = 3600 * 24; // Optimistic oracle liveness set to 24h.
@@ -70,7 +72,7 @@ contract CoverFi is Testable, Ownable {
     string constant ancillaryDataHead = 'q:"Had the following insured event occurred as of request timestamp: ';
     string constant ancillaryDataTail = '?"';
 
-    FinderInterface public immutable finder; // Finder for UMA contracts.
+    FinderInterface public finder; // Finder for UMA contracts.
 
     OptimisticOracleV2Interface public immutable oo; // Optimistic Oracle instance where claims are resolved.
 
@@ -80,7 +82,6 @@ contract CoverFi is Testable, Ownable {
 
     uint256 public constant MAX_EVENT_DESCRIPTION_SIZE = 300; // Insured event description should be concise.
 
-    mapping(uint256 => AllowedInsurance) public allowedInsurances;
 
     /****************************************
      *                EVENTS                *
@@ -107,19 +108,15 @@ contract CoverFi is Testable, Ownable {
      * @param _timer to enable simple time manipulation on this contract to simplify testing.
      */
     constructor(
-        FinderInterface _finder,
+        address _finderAddress,
         address _currency,
         address _timer,
         address _alluoAddress
     ) Testable(_timer) {
-        finder = _finder;
+        finder = FinderInterface(_finderAddress);
         currency = IERC20(_currency);
         oo = OptimisticOracleV2Interface(finder.getImplementationAddress(OracleInterfaces.OptimisticOracleV2));
         alluo = IIbAlluo(_alluoAddress);
-        addAllowedInsurances(1, "Aave","0.0191");
-        addAllowedInsurances(2, "Yearn","0.0191");
-        addAllowedInsurances(3, "Comp", "0.0191");
-
 
     }
 
@@ -127,17 +124,8 @@ contract CoverFi is Testable, Ownable {
      *          INSURANCE FUNCTIONS           *
      ******************************************/
 
-    /**
-     * @notice Deposits insuredAmount from the insurer and issues insurance policy to the insured beneficiary.
-     * @dev This contract must be approved to spend at least insuredAmount of currency token.
-     * @param insuredEvent short description of insured event. Potential verifiers should be able to evaluate whether
-     * this event had occurred as of claim time with binary yes/no answer.
-     * @param insuredAddress Beneficiary address eligible for insurance compensation.
-     * @param insuredAmount Amount of insurance coverage.
-     * @return policyId Unique identifier of issued insurance policy.
-     */
 
-    function calculateStake(uint256 _protocolAddress, uint256 _insuredAmount) internal returns(uint256){
+    function calculateStake(uint256 _protocolAddress, uint256 _insuredAmount) public view returns(uint256){
         uint256 premium = allowedInsurances[_protocolAddress].premium;
         uint256 stake = premium * _insuredAmount;
         return stake;
@@ -152,7 +140,6 @@ contract CoverFi is Testable, Ownable {
         require(bytes(insuredEvent).length <= MAX_EVENT_DESCRIPTION_SIZE, "Event description too long");
         require(insuredAddress != address(0), "Invalid insured address");
         require(insuredAmount > 0, "Amount should be above 0");
-        require(allowedInsurances[protocolAddress]);
         require(premium >= calculateStake(protocolAddress, insuredAmount)/alluo.growingRatio());
         //TODO: check if the protocol is in allowedInsurances
         policyId = _getPolicyId(block.number, insuredEvent, insuredAddress, insuredAmount);
@@ -232,13 +219,13 @@ contract CoverFi is Testable, Ownable {
 
     function addAllowedInsurances(
         uint256 _protocolAddress,
-        string _name,
+        string memory _name,
         uint256 _premium
         )
-        external
+        public
         onlyOwner
     {
-        require(allowedInsurances[_protocolAddress] == 0, "Already exists");
+        require(allowedInsurances[_protocolAddress].premium == 0, "Already exists");
         allowedInsurances[_protocolAddress] = AllowedInsurance({
             name: _name,
             premium: _premium
