@@ -36,9 +36,16 @@ contract CoverFi is Testable, Ownable {
     struct InsurancePolicy {
         bool claimInitiated; // Claim state preventing simultaneous claim attempts.
         string insuredEvent; // Short description of insured event.
+        string protocolAddress;
         address insuredAddress; // Beneficiary address eligible for insurance compensation.
         uint256 insuredAmount; // Amount of insurance coverage.
         uint256 premium; // Premium
+    }
+
+    struct AllowedInsurance {
+        address protocolAddress;
+        uint256 maxAmount;
+        uint256 premium;
     }
 
     // References all active insurance policies by policyId.
@@ -72,6 +79,8 @@ contract CoverFi is Testable, Ownable {
     IIbAlluo public immutable alluo; // Alluo
 
     uint256 public constant MAX_EVENT_DESCRIPTION_SIZE = 300; // Insured event description should be concise.
+
+    AllowedInsurance[] private allowedInsurances;
 
     /****************************************
      *                EVENTS                *
@@ -131,6 +140,7 @@ contract CoverFi is Testable, Ownable {
         require(bytes(insuredEvent).length <= MAX_EVENT_DESCRIPTION_SIZE, "Event description too long");
         require(insuredAddress != address(0), "Invalid insured address");
         require(insuredAmount > 0, "Amount should be above 0");
+        //TODO: check if the protocol is in allowedInsurances
         policyId = _getPolicyId(block.number, insuredEvent, insuredAddress, insuredAmount);
         require(insurancePolicies[policyId].insuredAddress == address(0), "Policy already issued");
 
@@ -195,16 +205,39 @@ contract CoverFi is Testable, Ownable {
 
         delete insurancePolicies[policyId];
         delete userPolicies[insurancePolicy.insuredAddress][policyId];
+        totalInsurancePremium -= insurancePolicy.premium;
 
         // Withdraw from Alluo and transfer to the user
         alluo.withdrawTo(insurancePolicy.insuredAddress, currency, insurancePolicy.premium);
 
-        emit PolicyCanceled(policyId, premium);
+        emit PolicyCanceled(policyId, insurancePolicy.premium);
     }
 
-    //TODO: possibilty to withdraw the treasury from Alluo
     function withdrawFromTreasury(uint256 amount) external onlyOwner {
-        alluo.withdrawTo(msg.sender, currency, amount);
+        alluo.withdrawTo(msg.sender, address(currency), amount);
+    }
+
+    function addAllowedInsurances(
+        address protocolAddress,
+        uint256 maxAmount,
+        uint256 premium
+        )
+        external
+        onlyOwner
+        returns (bool)
+    {
+        for (uint256 i = 0; i < allowedInsurances.length; i++) {
+            if (allowedInsurances[i].protocolAddress == protocolAddress) {
+                return false; //Already exist
+            }
+        }
+        AllowedInsurance memory allowedInsurance = AllowedInsurance({
+            protocolAddress: protocolAddress,
+            maxAmount: maxAmount,
+            premium: premium
+        });
+        allowedInsurances.push(allowedInsurance);
+        return true;
     }
 
     /******************************************
@@ -237,7 +270,7 @@ contract CoverFi is Testable, Ownable {
         if (price == 1e18) {
             delete insurancePolicies[policyId];
             delete userPolicies[claimedPolicy.insuredAddress][policyId];
-            currency.safeTransfer(claimedPolicy.insuredAddress, claimedPolicy.insuredAmount);
+            alluo.withdrawTo(claimedPolicy.insuredAddress, address(currency), claimedPolicy.insuredAmount);
 
             emit ClaimAccepted(claimId, policyId);
             // Otherwise just reset the flag so that repeated claims can be made.
