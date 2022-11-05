@@ -44,7 +44,7 @@ contract CoverFi is Testable, Ownable {
 
     struct AllowedInsurance {
         string name;
-        uint256 premium;
+        uint256 premium; //Percentage
     }
 
     // References all active insurance policies by policyId.
@@ -62,7 +62,7 @@ contract CoverFi is Testable, Ownable {
 
     uint256 public constant oracleBondPercentage = 0.001e18; // Proposal bond set to 0.1% of claimed insurance coverage.
 
-    uint256 public constant optimisticOracleLivenessTime = 3600 * 24; // Optimistic oracle liveness set to 24h.
+    uint256 public constant optimisticOracleLivenessTime = 120; //3600 * 24; // Optimistic oracle liveness set to 24h.
 
     // Price identifier to use when requesting claims through Optimistic Oracle.
     bytes32 public constant priceIdentifier = "YES_OR_NO_QUERY";
@@ -103,16 +103,17 @@ contract CoverFi is Testable, Ownable {
 
     /**
      * @notice Construct the InsuranceArbitrator
-     * @param _finder DVM finder to find other UMA ecosystem contracts.
+     * @param _finderAddress DVM finder to find other UMA ecosystem contracts.
      * @param _currency denomination token for insurance coverage and bonding.
      * @param _timer to enable simple time manipulation on this contract to simplify testing.
+     * @param _alluoAddress _alluoAddress.
      */
     constructor(
         address _finderAddress,
         address _currency,
         address _timer,
         address _alluoAddress
-    ) Testable(_timer) {
+    ) Testable(_timer) payable {
         finder = FinderInterface(_finderAddress);
         currency = IERC20(_currency);
         oo = OptimisticOracleV2Interface(finder.getImplementationAddress(OracleInterfaces.OptimisticOracleV2));
@@ -124,12 +125,12 @@ contract CoverFi is Testable, Ownable {
      *          INSURANCE FUNCTIONS           *
      ******************************************/
 
-
     function calculateStake(uint256 _protocolAddress, uint256 _insuredAmount) public view returns(uint256){
         uint256 premium = allowedInsurances[_protocolAddress].premium;
-        uint256 stake = premium * _insuredAmount;
+        uint256 stake = premium * _insuredAmount / 1e18;
         return stake;
     }
+
     function issueInsurance(
         uint256 protocolAddress,
         string calldata insuredEvent,
@@ -140,7 +141,7 @@ contract CoverFi is Testable, Ownable {
         require(bytes(insuredEvent).length <= MAX_EVENT_DESCRIPTION_SIZE, "Event description too long");
         require(insuredAddress != address(0), "Invalid insured address");
         require(insuredAmount > 0, "Amount should be above 0");
-        require(premium >= calculateStake(protocolAddress, insuredAmount)/alluo.growingRatio());
+        require(premium >= calculateStake(protocolAddress, insuredAmount));
         //TODO: check if the protocol is in allowedInsurances
         policyId = _getPolicyId(block.number, insuredEvent, insuredAddress, insuredAmount);
         require(insurancePolicies[policyId].insuredAddress == address(0), "Policy already issued");
@@ -153,7 +154,15 @@ contract CoverFi is Testable, Ownable {
 
         userPolicies[insuredAddress].push(policyId);
 
-        currency.safeTransferFrom(msg.sender, address(this), insuredAmount);
+        totalInsurancePremium += premium;
+
+        // from the user to the smart contract
+        // currency.approve(address(this), premium);
+        // currency.safeTransferFrom(msg.sender, address(this), premium);
+
+        // from the smart contract to the alluo
+        currency.approve(address(alluo), premium);
+        alluo.deposit(address(currency), premium);
 
         emit PolicyIssued(policyId, msg.sender, insuredEvent, insuredAddress, insuredAmount, premium);
     }
