@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.0;
 
-
+import "./protocol/AlluoERC20Upgradable";
+import "./protocol/IExchange";
+import "./protocol/ILiquidityHandler";
+import "./protocol/Interest";
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -178,6 +181,28 @@ contract CoverFi is Testable, Ownable {
      /******************************************
      *           Alluo FUNCTIONS           *
      ******************************************/
+     function deposit(address _token, uint256 _amount) external {
+        // The main token is the one which isn't converted to primary tokens.
+        // Small issue with deposits and withdrawals though. Need to approve.
+        if (supportedTokens.contains(_token) == false) {
+            IERC20Upgradeable(_token).safeTransferFrom(msg.sender, address(this), _amount);
+            (, address primaryToken) = ILiquidityHandler(liquidityHandler).getAdapterCoreTokensFromIbAlluo(address(this));
+            IERC20Upgradeable(_token).safeIncreaseAllowance(exchangeAddress, _amount);
+            _amount = IExchange(exchangeAddress).exchange(_token, primaryToken, _amount, 0);
+            _token = primaryToken;
+            IERC20Upgradeable(primaryToken).safeTransfer(address(liquidityHandler), _amount);
+        } else {
+            IERC20Upgradeable(_token).safeTransferFrom(msg.sender,address(liquidityHandler),_amount);
+        }
+        updateRatio();
+        ILiquidityHandler(liquidityHandler).deposit(_token, _amount);
+        uint256 amountIn18 = _amount * 10**(18 - AlluoERC20Upgradable(_token).decimals());
+        uint256 adjustedAmount = (amountIn18 * multiplier) / growingRatio;
+        _mint(msg.sender, adjustedAmount);
+        emit TransferAssetValue(address(0), msg.sender, adjustedAmount, amountIn18, growingRatio);
+        emit Deposited(msg.sender, _token, _amount);
+    }
+
     function withdraw(bytes32 policyId) external {
         InsurancePolicy storage insurancePolicy = insurancePolicies[policyId];
 
