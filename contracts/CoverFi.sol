@@ -202,8 +202,7 @@ contract CoverFi is Testable, Ownable {
         require(msg.sender == insurancePolicy.insuredAddress, "Not the insurance owner");
         require(!insurancePolicy.claimInitiated, "Claim already initiated");
 
-        delete insurancePolicies[policyId];
-        delete userPolicies[insurancePolicy.insuredAddress][policyId];
+        _deletePolicy(policyId);
         totalInsurancePremium -= insurancePolicy.premium;
 
         // Withdraw from Alluo and transfer to the user
@@ -259,8 +258,7 @@ contract CoverFi is Testable, Ownable {
 
         // Deletes insurance policy and transfers claim amount if the claim was confirmed.
         if (price == 1e18) {
-            delete insurancePolicies[policyId];
-            delete userPolicies[claimedPolicy.insuredAddress][policyId];
+            _deletePolicy(policyId);
             alluo.withdrawTo(claimedPolicy.insuredAddress, address(currency), claimedPolicy.insuredAmount);
 
             emit ClaimAccepted(claimId, policyId);
@@ -287,6 +285,21 @@ contract CoverFi is Testable, Ownable {
 
     function _getClaimId(uint256 timestamp, bytes memory ancillaryData) internal pure returns (bytes32) {
         return keccak256(abi.encode(timestamp, ancillaryData));
+    }
+
+    function _findArrayIndex(bytes32[] memory array, bytes32 value) internal pure returns(uint) {
+        uint i = 0;
+        while (array[i] != value) {
+            i++;
+        }
+        return i;
+    }
+
+    function _deletePolicy(bytes32 policyId) internal{
+        address insuredAddress = insurancePolicies[policyId].insuredAddress;
+        uint index = _findArrayIndex(userPolicies[insuredAddress], policyId);
+        delete userPolicies[insuredAddress][index];
+        delete insurancePolicies[policyId];
     }
 
     //Alluo
