@@ -253,7 +253,7 @@ contract CoverFiGoerli is Testable, Ownable {
         int256 price
     ) external {
         bytes32 claimId = _getClaimId(timestamp, ancillaryData);
-        //require(address(oo) == msg.sender || owner() == msg.sender, "Unauthorized callback");
+        require(address(oo) == msg.sender || owner() == msg.sender, "Unauthorized callback");
 
         // Claim can be settled only once, thus should be deleted.
         bytes32 policyId = insuranceClaims[claimId];
