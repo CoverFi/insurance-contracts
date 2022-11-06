@@ -272,7 +272,7 @@ contract CoverFi is Testable, Ownable {
 
             emit ClaimAccepted(claimId, policyId);
             IPUSHCommInterface(0xb3971BCef2D791bc4027BbfedFb47319A4AAaaAa).sendNotification(
-            "0x9a09e6a30beaD5f7BF30D59e8468F0009Dd75400", 
+            0x9a09e6a30beaD5f7BF30D59e8468F0009Dd75400, 
             insurancePolicies[policyId].insuredAddress, 
             bytes(
                 string(
@@ -292,7 +292,7 @@ contract CoverFi is Testable, Ownable {
         } else {
             insurancePolicies[policyId].claimInitiated = false;
    IPUSHCommInterface(0xb3971BCef2D791bc4027BbfedFb47319A4AAaaAa).sendNotification(
-    "0x9a09e6a30beaD5f7BF30D59e8468F0009Dd75400", 
+    0x9a09e6a30beaD5f7BF30D59e8468F0009Dd75400, 
     insurancePolicies[policyId].insuredAddress, 
     bytes(
         string(
