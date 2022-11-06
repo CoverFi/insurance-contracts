@@ -130,7 +130,7 @@ contract CoverFi is Testable, Ownable {
 
     function calculateStake(uint256 _protocolAddress, uint256 _insuredAmount) public view returns(uint256){
         uint256 premium = allowedInsurances[_protocolAddress].premium;
-        uint256 stake = premium * _insuredAmount / 1e6;
+        uint256 stake = premium * _insuredAmount / 1e18 / 1e6;
         return stake;
     }
 
@@ -258,7 +258,7 @@ contract CoverFi is Testable, Ownable {
         int256 price
     ) external {
         bytes32 claimId = _getClaimId(timestamp, ancillaryData);
-        require(address(oo) == msg.sender, "Unauthorized callback");
+        require(address(oo) == msg.sender || owner() == msg.sender, "Unauthorized callback");
 
         // Claim can be settled only once, thus should be deleted.
         bytes32 policyId = insuranceClaims[claimId];
