@@ -22,7 +22,7 @@ import "./interfaces/IIbAlluo.sol";
  * automatically pays out insurance coverage to the insured beneficiary. If the claim is rejected policy continues to be
  * active ready for the subsequent claim attempts.
  */
-contract CoverFiGoerli is Testable, Ownable {
+contract CoverFiGnosis is Testable, Ownable {
     using SafeERC20 for IERC20;
 
     /******************************************
@@ -106,13 +106,11 @@ contract CoverFiGoerli is Testable, Ownable {
      * @param _finderAddress DVM finder to find other UMA ecosystem contracts.
      * @param _currency denomination token for insurance coverage and bonding.
      * @param _timer to enable simple time manipulation on this contract to simplify testing.
-     * @param _alluoAddress _alluoAddress.
      */
     constructor(
         address _finderAddress,
         address _currency,
-        address _timer,
-        address _alluoAddress
+        address _timer
     ) Testable(_timer) payable {
         finder = FinderInterface(_finderAddress);
         currency = IERC20(_currency);
