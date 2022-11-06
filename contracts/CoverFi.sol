@@ -314,6 +314,26 @@ contract CoverFi is Testable, Ownable {
     }
 
     /******************************************
+     *           GETTERS                      *
+     ******************************************/
+    function getUserPolicies(address addr) public view returns (bytes32[] memory) {
+        return userPolicies[addr];
+    }
+
+    // function getUserActivePolicies(address addr) public view returns (bytes32[] memory) {
+    //     bytes32[] memory userActivePolicies;
+    //     uint i = 0; uint j = 0;
+    //     while (i < userPolicies[addr].length) {
+    //         if(userPolicies[addr][i] != 0) {
+    //             userActivePolicies[j] = userPolicies[addr][i];
+    //             j++;
+    //         }
+    //         i++;
+    //     }
+    //     return userActivePolicies;
+    // }
+
+    /******************************************
      *           INTERNAL FUNCTIONS           *
      ******************************************/
 
