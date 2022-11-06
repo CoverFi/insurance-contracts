@@ -69,7 +69,7 @@ contract CoverFi is Testable, Ownable {
 
     // Template for constructing ancillary data. The claim would insert insuredEvent in between when requesting
     // through Optimistic Oracle.
-    string constant ancillaryDataHead = 'q:"Had the following insured event occurred as of request timestamp: ';
+    string constant ancillaryDataHead = 'q:"Had the following protocol been hacked as of request timestamp: ';
     string constant ancillaryDataTail = '?"';
 
     FinderInterface public finder; // Finder for UMA contracts.
@@ -156,11 +156,9 @@ contract CoverFi is Testable, Ownable {
 
         totalInsurancePremium += premium;
 
-        // from the user to the smart contract
-        // currency.approve(address(this), premium);
-        // currency.safeTransferFrom(msg.sender, address(this), premium);
+        // TODO: user has to approve in the frontend
+        currency.safeTransferFrom(msg.sender, address(this), premium);
 
-        // from the smart contract to the alluo
         currency.approve(address(alluo), premium);
         alluo.deposit(address(currency), premium);
 
@@ -202,22 +200,17 @@ contract CoverFi is Testable, Ownable {
         emit ClaimSubmitted(timestamp, claimId, policyId);
     }
 
-     /******************************************
-     *           Alluo FUNCTIONS           *
-     ******************************************/
-   
-
     function cancelInsurance(bytes32 policyId) external {
         InsurancePolicy storage insurancePolicy = insurancePolicies[policyId];
 
         require(msg.sender == insurancePolicy.insuredAddress, "Not the insurance owner");
         require(!insurancePolicy.claimInitiated, "Claim already initiated");
 
-        _deletePolicy(policyId);
-        totalInsurancePremium -= insurancePolicy.premium;
-
         // Withdraw from Alluo and transfer to the user
         alluo.withdrawTo(insurancePolicy.insuredAddress, address(currency), insurancePolicy.premium);
+
+        totalInsurancePremium -= insurancePolicy.premium;
+        _deletePolicy(policyId);
 
         emit PolicyCanceled(policyId, insurancePolicy.premium);
     }
@@ -269,8 +262,8 @@ contract CoverFi is Testable, Ownable {
 
         // Deletes insurance policy and transfers claim amount if the claim was confirmed.
         if (price == 1e18) {
-            _deletePolicy(policyId);
             alluo.withdrawTo(claimedPolicy.insuredAddress, address(currency), claimedPolicy.insuredAmount);
+             _deletePolicy(policyId);
 
             emit ClaimAccepted(claimId, policyId);
             // Otherwise just reset the flag so that repeated claims can be made.
@@ -313,10 +306,7 @@ contract CoverFi is Testable, Ownable {
         delete insurancePolicies[policyId];
     }
 
-    //Alluo
-    function deposit(address _token, uint256 _amount) internal {
-        alluo.deposit(_token, _amount);
-        totalInsurancePremium +=_amount;
-    }
+    receive() external payable {}
+    fallback() external payable {}
     
 }
