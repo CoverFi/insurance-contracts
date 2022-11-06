@@ -3,15 +3,12 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "@uma/core/contracts/common/implementation/AddressWhitelist.sol";
 import "@uma/core/contracts/oracle/implementation/Constants.sol";
 import "@uma/core/contracts/common/implementation/Testable.sol";
 import "@uma/core/contracts/oracle/interfaces/FinderInterface.sol";
 import "@uma/core/contracts/oracle/interfaces/OptimisticOracleV2Interface.sol";
-
-import "./interfaces/IIbAlluo.sol";
 
 /**
  * @title Insurance Arbitrator Contract
@@ -22,69 +19,52 @@ import "./interfaces/IIbAlluo.sol";
  * automatically pays out insurance coverage to the insured beneficiary. If the claim is rejected policy continues to be
  * active ready for the subsequent claim attempts.
  */
+
 interface IPUSHCommInterface {
     function sendNotification(address _channel, address _recipient, bytes calldata _identity) external;
 }
-contract CoverFi is Testable, Ownable {
+
+contract InsuranceArbitrator is Testable {
     using SafeERC20 for IERC20;
 
     /******************************************
      *  STATE VARIABLES AND DATA STRUCTURES   *
      ******************************************/
 
-    uint256 public totalInsurancePremium;
-    
-
     // Stores state and parameters of insurance policy.
     struct InsurancePolicy {
         bool claimInitiated; // Claim state preventing simultaneous claim attempts.
         string insuredEvent; // Short description of insured event.
-        string protocolAddress;
         address insuredAddress; // Beneficiary address eligible for insurance compensation.
         uint256 insuredAmount; // Amount of insurance coverage.
-        uint256 premium; // Premium
-    }
-
-    struct AllowedInsurance {
-        string name;
-        uint256 premium; //Percentage
     }
 
     // References all active insurance policies by policyId.
     mapping(bytes32 => InsurancePolicy) public insurancePolicies;
 
-    // Mapping from user address to policyId array (a user can have multiple active policies).
-    mapping(address => bytes32[]) public userPolicies;
-
     // Maps hash of initiated claims to their policyId.
     // This is used in callback function to potentially pay out the beneficiary.
     mapping(bytes32 => bytes32) public insuranceClaims;
 
-    mapping(uint256 => AllowedInsurance) public allowedInsurances;
-
-
     uint256 public constant oracleBondPercentage = 0.001e18; // Proposal bond set to 0.1% of claimed insurance coverage.
 
-    uint256 public constant optimisticOracleLivenessTime = 120; //3600 * 24; // Optimistic oracle liveness set to 24h.
+    uint256 public constant optimisticOracleLivenessTime = 3600 * 24; // Optimistic oracle liveness set to 24h.
 
     // Price identifier to use when requesting claims through Optimistic Oracle.
     bytes32 public constant priceIdentifier = "YES_OR_NO_QUERY";
 
     // Template for constructing ancillary data. The claim would insert insuredEvent in between when requesting
     // through Optimistic Oracle.
-    string constant ancillaryDataHead = 'q:"Had the following protocol been hacked as of request timestamp: ';
+    string constant ancillaryDataHead = 'q:"Had the following hack occurred as of request timestamp: ';
     string constant ancillaryDataTail = '?"';
 
-    FinderInterface public finder; // Finder for UMA contracts.
+    FinderInterface public immutable finder; // Finder for UMA contracts.
 
     OptimisticOracleV2Interface public immutable oo; // Optimistic Oracle instance where claims are resolved.
 
     IERC20 public immutable currency; // Denomination token for insurance coverage and bonding.
 
-    IIbAlluo public immutable alluo; // Alluo
-
     uint256 public constant MAX_EVENT_DESCRIPTION_SIZE = 300; // Insured event description should be concise.
-
 
     /****************************************
      *                EVENTS                *
@@ -95,57 +75,49 @@ contract CoverFi is Testable, Ownable {
         address indexed insurer,
         string insuredEvent,
         address indexed insuredAddress,
-        uint256 insuredAmount,
-        uint256 premium
+        uint256 insuredAmount
     );
-    event PolicyCanceled(bytes32 indexed policyId, uint256 premium);
-
     event ClaimSubmitted(uint256 claimTimestamp, bytes32 indexed claimId, bytes32 indexed policyId);
     event ClaimAccepted(bytes32 indexed claimId, bytes32 indexed policyId);
     event ClaimRejected(bytes32 indexed claimId, bytes32 indexed policyId);
 
     /**
      * @notice Construct the InsuranceArbitrator
-     * @param _finderAddress DVM finder to find other UMA ecosystem contracts.
+     * @param _finder DVM finder to find other UMA ecosystem contracts.
      * @param _currency denomination token for insurance coverage and bonding.
      * @param _timer to enable simple time manipulation on this contract to simplify testing.
-     * @param _alluoAddress _alluoAddress.
      */
     constructor(
-        address _finderAddress,
+        FinderInterface _finder,
         address _currency,
-        address _timer,
-        address _alluoAddress
-    ) Testable(_timer) payable {
-        finder = FinderInterface(_finderAddress);
+        address _timer
+    ) Testable(_timer) {
+        finder = _finder;
         currency = IERC20(_currency);
         oo = OptimisticOracleV2Interface(finder.getImplementationAddress(OracleInterfaces.OptimisticOracleV2));
-        alluo = IIbAlluo(_alluoAddress);
-
     }
 
     /******************************************
      *          INSURANCE FUNCTIONS           *
      ******************************************/
 
-    function calculateStake(uint256 _protocolAddress, uint256 _insuredAmount) public view returns(uint256){
-        uint256 premium = allowedInsurances[_protocolAddress].premium;
-        uint256 stake = premium * _insuredAmount / 1e6;
-        return stake;
-    }
-
+    /**
+     * @notice Deposits insuredAmount from the insurer and issues insurance policy to the insured beneficiary.
+     * @dev This contract must be approved to spend at least insuredAmount of currency token.
+     * @param insuredEvent short description of insured event. Potential verifiers should be able to evaluate whether
+     * this event had occurred as of claim time with binary yes/no answer.
+     * @param insuredAddress Beneficiary address eligible for insurance compensation.
+     * @param insuredAmount Amount of insurance coverage.
+     * @return policyId Unique identifier of issued insurance policy.
+     */
     function issueInsurance(
-        uint256 protocolAddress,
         string calldata insuredEvent,
         address insuredAddress,
-        uint256 insuredAmount,
-        uint256 premium
+        uint256 insuredAmount
     ) external returns (bytes32 policyId) {
         require(bytes(insuredEvent).length <= MAX_EVENT_DESCRIPTION_SIZE, "Event description too long");
         require(insuredAddress != address(0), "Invalid insured address");
         require(insuredAmount > 0, "Amount should be above 0");
-        require(premium >= calculateStake(protocolAddress, insuredAmount));
-        //TODO: check if the protocol is in allowedInsurances
         policyId = _getPolicyId(block.number, insuredEvent, insuredAddress, insuredAmount);
         require(insurancePolicies[policyId].insuredAddress == address(0), "Policy already issued");
 
@@ -153,21 +125,10 @@ contract CoverFi is Testable, Ownable {
         newPolicy.insuredEvent = insuredEvent;
         newPolicy.insuredAddress = insuredAddress;
         newPolicy.insuredAmount = insuredAmount;
-        newPolicy.premium = premium;
 
-        userPolicies[insuredAddress].push(policyId);
+        currency.safeTransferFrom(msg.sender, address(this), insuredAmount);
 
-        totalInsurancePremium += premium;
-
-        // TODO: user has to approve in the frontend
-        currency.safeTransferFrom(msg.sender, address(this), premium);
-
-        currency.approve(address(alluo), premium);
-        alluo.deposit(address(currency), premium);
-
-
-
-        emit PolicyIssued(policyId, msg.sender, insuredEvent, insuredAddress, insuredAmount, premium);
+        emit PolicyIssued(policyId, msg.sender, insuredEvent, insuredAddress, insuredAmount);
     }
 
     /**
@@ -205,40 +166,6 @@ contract CoverFi is Testable, Ownable {
         emit ClaimSubmitted(timestamp, claimId, policyId);
     }
 
-    function cancelInsurance(bytes32 policyId) external {
-        InsurancePolicy storage insurancePolicy = insurancePolicies[policyId];
-
-        require(msg.sender == insurancePolicy.insuredAddress, "Not the insurance owner");
-        require(!insurancePolicy.claimInitiated, "Claim already initiated");
-
-        // Withdraw from Alluo and transfer to the user
-        alluo.withdrawTo(insurancePolicy.insuredAddress, address(currency), insurancePolicy.premium);
-
-        totalInsurancePremium -= insurancePolicy.premium;
-        _deletePolicy(policyId);
-
-        emit PolicyCanceled(policyId, insurancePolicy.premium);
-    }
-
-    function withdrawFromTreasury(uint256 amount) external onlyOwner {
-        alluo.withdrawTo(msg.sender, address(currency), amount);
-    }
-
-    function addAllowedInsurances(
-        uint256 _protocolAddress,
-        string memory _name,
-        uint256 _premium
-        )
-        public
-        onlyOwner
-    {
-        require(allowedInsurances[_protocolAddress].premium == 0, "Already exists");
-        allowedInsurances[_protocolAddress] = AllowedInsurance({
-            name: _name,
-            premium: _premium
-        });
-    }
-
     /******************************************
      *           CALLBACK FUNCTIONS           *
      ******************************************/
@@ -267,48 +194,14 @@ contract CoverFi is Testable, Ownable {
 
         // Deletes insurance policy and transfers claim amount if the claim was confirmed.
         if (price == 1e18) {
-            alluo.withdrawTo(claimedPolicy.insuredAddress, address(currency), claimedPolicy.insuredAmount);
-             _deletePolicy(policyId);
+            delete insurancePolicies[policyId];
+            currency.safeTransfer(claimedPolicy.insuredAddress, claimedPolicy.insuredAmount);
 
             emit ClaimAccepted(claimId, policyId);
-            IPUSHCommInterface(0xb3971BCef2D791bc4027BbfedFb47319A4AAaaAa).sendNotification(
-            "0x9a09e6a30beaD5f7BF30D59e8468F0009Dd75400", 
-            insurancePolicies[policyId].insuredAddress, 
-            bytes(
-                string(
-                    abi.encodePacked(
-                        "0", 
-                        "+", 
-                        "3", 
-                        "+", 
-                        "Insurance Settled!", 
-                        "+", 
-                        "You are ellible to redeem the insurance and the full amount has been deposited to your account." // notification body
-                    )
-                )
-            )
-        );
             // Otherwise just reset the flag so that repeated claims can be made.
         } else {
             insurancePolicies[policyId].claimInitiated = false;
-   IPUSHCommInterface(0xb3971BCef2D791bc4027BbfedFb47319A4AAaaAa).sendNotification(
-    "0x9a09e6a30beaD5f7BF30D59e8468F0009Dd75400", 
-    insurancePolicies[policyId].insuredAddress, 
-    bytes(
-        string(
-            // We are passing identity here: https://docs.epns.io/developers/developer-guides/sending-notifications/advanced/notification-payload-types/identity/payload-identity-implementations
-            abi.encodePacked(
-                "0", // this is notification identity: https://docs.epns.io/developers/developer-guides/sending-notifications/advanced/notification-payload-types/identity/payload-identity-implementations
-                "+", // segregator
-                "3", // this is payload type: https://docs.epns.io/developers/developer-guides/sending-notifications/advanced/notification-payload-types/payload (1, 3 or 4) = (Broadcast, targetted or subset)
-                "+", // segregator
-                "Insurance Denied!", // this is notificaiton title
-                "+", // segregator
-                "You are not ellible to redeem the insurance the hack has not been verified." // notification body
-            )
-        )
-    )
-);
+
             emit ClaimRejected(claimId, policyId);
         }
     }
@@ -329,23 +222,4 @@ contract CoverFi is Testable, Ownable {
     function _getClaimId(uint256 timestamp, bytes memory ancillaryData) internal pure returns (bytes32) {
         return keccak256(abi.encode(timestamp, ancillaryData));
     }
-
-    function _findArrayIndex(bytes32[] memory array, bytes32 value) internal pure returns(uint) {
-        uint i = 0;
-        while (array[i] != value) {
-            i++;
-        }
-        return i;
-    }
-
-    function _deletePolicy(bytes32 policyId) internal{
-        address insuredAddress = insurancePolicies[policyId].insuredAddress;
-        uint index = _findArrayIndex(userPolicies[insuredAddress], policyId);
-        delete userPolicies[insuredAddress][index];
-        delete insurancePolicies[policyId];
-    }
-
-    receive() external payable {}
-    fallback() external payable {}
-    
 }
