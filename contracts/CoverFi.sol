@@ -22,7 +22,7 @@ import "./interfaces/IIbAlluo.sol";
  * automatically pays out insurance coverage to the insured beneficiary. If the claim is rejected policy continues to be
  * active ready for the subsequent claim attempts.
  */
-contract CoverFi is Testable, Ownable {
+contract CoverFiGoerli is Testable, Ownable {
     using SafeERC20 for IERC20;
 
     /******************************************
@@ -78,7 +78,7 @@ contract CoverFi is Testable, Ownable {
 
     IERC20 public immutable currency; // Denomination token for insurance coverage and bonding.
 
-    IIbAlluo public immutable alluo; // Alluo
+    //IIbAlluo public immutable alluo; // Alluo
 
     uint256 public constant MAX_EVENT_DESCRIPTION_SIZE = 300; // Insured event description should be concise.
 
@@ -117,7 +117,7 @@ contract CoverFi is Testable, Ownable {
         finder = FinderInterface(_finderAddress);
         currency = IERC20(_currency);
         oo = OptimisticOracleV2Interface(finder.getImplementationAddress(OracleInterfaces.OptimisticOracleV2));
-        alluo = IIbAlluo(_alluoAddress);
+        //alluo = IIbAlluo(_alluoAddress);
 
     }
 
@@ -127,7 +127,7 @@ contract CoverFi is Testable, Ownable {
 
     function calculateStake(uint256 _protocolAddress, uint256 _insuredAmount) public view returns(uint256){
         uint256 premium = allowedInsurances[_protocolAddress].premium;
-        uint256 stake = premium * _insuredAmount / 1e18;
+        uint256 stake = premium * _insuredAmount / 1e18 / 1e6;
         return stake;
     }
 
@@ -159,8 +159,8 @@ contract CoverFi is Testable, Ownable {
         // TODO: user has to approve in the frontend
         currency.safeTransferFrom(msg.sender, address(this), premium);
 
-        currency.approve(address(alluo), premium);
-        alluo.deposit(address(currency), premium);
+        //currency.approve(address(alluo), premium);
+        //alluo.deposit(address(currency), premium);
 
         emit PolicyIssued(policyId, msg.sender, insuredEvent, insuredAddress, insuredAmount, premium);
     }
@@ -207,7 +207,7 @@ contract CoverFi is Testable, Ownable {
         require(!insurancePolicy.claimInitiated, "Claim already initiated");
 
         // Withdraw from Alluo and transfer to the user
-        alluo.withdrawTo(insurancePolicy.insuredAddress, address(currency), insurancePolicy.premium);
+        //alluo.withdrawTo(insurancePolicy.insuredAddress, address(currency), insurancePolicy.premium);
 
         totalInsurancePremium -= insurancePolicy.premium;
         _deletePolicy(policyId);
@@ -216,13 +216,13 @@ contract CoverFi is Testable, Ownable {
     }
 
     function withdrawFromTreasury(uint256 amount) external onlyOwner {
-        alluo.withdrawTo(msg.sender, address(currency), amount);
+        //alluo.withdrawTo(msg.sender, address(currency), amount);
     }
 
     function addAllowedInsurances(
         uint256 _protocolAddress,
         string memory _name,
-        uint256 _premium
+        uint256 _premium //percentage 100000 = 1e5 = 0.1 = 10%
         )
         public
         onlyOwner
@@ -253,7 +253,7 @@ contract CoverFi is Testable, Ownable {
         int256 price
     ) external {
         bytes32 claimId = _getClaimId(timestamp, ancillaryData);
-        require(address(oo) == msg.sender, "Unauthorized callback");
+        //require(address(oo) == msg.sender || owner() == msg.sender, "Unauthorized callback");
 
         // Claim can be settled only once, thus should be deleted.
         bytes32 policyId = insuranceClaims[claimId];
@@ -262,7 +262,7 @@ contract CoverFi is Testable, Ownable {
 
         // Deletes insurance policy and transfers claim amount if the claim was confirmed.
         if (price == 1e18) {
-            alluo.withdrawTo(claimedPolicy.insuredAddress, address(currency), claimedPolicy.insuredAmount);
+            currency.safeTransfer(claimedPolicy.insuredAddress, claimedPolicy.insuredAmount);
              _deletePolicy(policyId);
 
             emit ClaimAccepted(claimId, policyId);
@@ -287,7 +287,7 @@ contract CoverFi is Testable, Ownable {
         return keccak256(abi.encode(blockNumber, insuredEvent, insuredAddress, insuredAmount));
     }
 
-    function _getClaimId(uint256 timestamp, bytes memory ancillaryData) internal pure returns (bytes32) {
+    function _getClaimId(uint256 timestamp, bytes memory ancillaryData) public pure returns (bytes32) {
         return keccak256(abi.encode(timestamp, ancillaryData));
     }
 
